@@ -16,6 +16,8 @@ load_dotenv()
 import argparse
 from datetime import datetime
 
+os.environ["IMAGEMAGICK_BINARY"] = "magick"
+
 # -----------------------------
 #  CONFIG / SECRETS
 # -----------------------------
@@ -411,6 +413,10 @@ def render_film_from_instructions(
             vc = VideoFileClip(clip_info.source_video).subclip(clip_info.start, clip_info.end)
             vc = vc.volumex(clip_info.volume)
             subclips.append(vc)
+            sub_text = get_subtitle_text_for_clip(clip_info.source_video, clip_info.start, clip_info.end)
+            if sub_text:
+                print(f"Adding subtitles to clip from {clip_info.source_video}")
+                vc = add_subtitles_to_clip(vc, sub_text)
         except Exception as e:
             print(f"Error loading subclip from {clip_info.source_video}: {e}")
 
@@ -420,15 +426,22 @@ def render_film_from_instructions(
 
     final = concatenate_videoclips(subclips, method="compose")
 
-    # Soundtrack
+    # Soundtrack and narration (if available)
+    audio_clips = []
     if instructions.soundtrack_path and os.path.exists(instructions.soundtrack_path):
         print(f"Adding soundtrack: {instructions.soundtrack_path}")
         music = AudioFileClip(instructions.soundtrack_path)
-        # If music is shorter, let it just end; if longer, we'll subclip to final duration
         if music.duration > final.duration:
             music = music.subclip(0, final.duration)
-        # If you want to mix multiple audio tracks or do voiceover, you'd use CompositeAudioClip
-        final_audio = CompositeAudioClip([music])
+        audio_clips.append(music)
+    if instructions.narration_path and os.path.exists(instructions.narration_path):
+        print(f"Adding narration audio: {instructions.narration_path}")
+        narration = AudioFileClip(instructions.narration_path)
+        if narration.duration > final.duration:
+            narration = narration.subclip(0, final.duration)
+        audio_clips.append(narration)
+    if audio_clips:
+        final_audio = CompositeAudioClip(audio_clips)
         final = final.set_audio(final_audio)
 
     output_name = final_file or instructions.output_filename
@@ -451,21 +464,25 @@ def generate_narration_script(clips_info):
     """
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
-    prompt = "Write a thoughtful, reflective narration script for a found footage essay film. The film is composed of the following clips:\n"
+    prompt = "Write a narration script for a found footage essay film. The film is composed of the following clips:\n"
     for (vid_file, start, end) in clips_info:
-        prompt += f"- Clip from {vid_file} starting at {start:.2f}s to {end:.2f}s\n"
-    prompt += "\nThe narration should weave these clips into a coherent essay."
+        # Get transcription lines for the clip
+        transcription = get_subtitle_text_for_clip(vid_file, start, end)
+        if transcription:
+            prompt += f"- Clip from {vid_file} starting at {start:.2f}s to {end:.2f}s. Transcription: {transcription}\n"
+        else:
+            prompt += f"- Clip from {vid_file} starting at {start:.2f}s to {end:.2f}s\n"
+    prompt += "\nThe narration should weave these transcriptions into a coherent but sarcastic essay in the style of Hito Steyerl and Chris Marker with influence from Italo Calvino. Use profanity."
     messages = [
         {"role": "system", "content": "You are a creative script writer."},
         {"role": "user", "content": prompt},
     ]
     try:
         response = client.chat.completions.create(
-            #model="gpt-4o-mini",
-            model="o3-mini",
+            model="gpt-4o-mini",
+            #model="o3-mini",
             messages=messages,
-            temperature=0.7,
-            #max_tokens=500
+            max_tokens=5000
         )
         script = response.choices[0].message.content.strip()
         print("Generated narration script:", script)
@@ -489,6 +506,48 @@ def generate_narration_audio(script, lang="en", out_filename="narration.mp3"):
     except Exception as e:
         print("Error generating narration audio:", e)
         return ""
+
+def get_subtitle_text_for_clip(video_file, clip_start, clip_end):
+    """
+    Given a video file and a clip time range, attempt to find the associated subtitle file,
+    parse it, and return a string of subtitle lines that fall entirely within the clip range.
+    """
+    import os
+    base = os.path.basename(video_file)
+    # Assuming the file naming follows the pattern: "footage/<title>_<video_id>.mp4"
+    parts = base.rsplit("_", 1)
+    if len(parts) < 2:
+        return ""
+    video_id_with_ext = parts[-1]
+    video_id = video_id_with_ext.split(".")[0]
+    sub_file = find_file_with_id(video_id, ".vtt")
+    if not sub_file:
+        return ""
+    lines = parse_subtitle_file(sub_file)
+    # Filter subtitle lines that fall within the clip time range
+    clip_lines = [line.text for line in lines if line.start >= clip_start and line.end <= clip_end]
+    return "\n".join(clip_lines)
+
+
+def add_subtitles_to_clip(clip, subtitle_text):
+    """
+    Given a video clip and subtitle text, create a TextClip and overlay it on the video.
+    Adjust fontsize and positioning as needed.
+    """
+    from moviepy.editor import TextClip, CompositeVideoClip
+    # Create a TextClip that will act as the subtitle overlay.
+    #txt_clip = TextClip(subtitle_text, fontsize=24, color='white', method='caption', size=(clip.w - 20, None))
+    # Using pillow method with a semi-transparent background to improve visibility.
+    txt_clip = TextClip(
+        #subtitle_text, 
+        "HELLO WORLD",
+        fontsize=32, 
+        color='white', 
+        method='caption',
+        bg_color='black',  # Add background to improve visibility
+    )
+    txt_clip = txt_clip.set_duration(clip.duration).set_position(('center', 'center'))
+    return CompositeVideoClip([clip, txt_clip])
 
 def main():
     parser = argparse.ArgumentParser(description="Generate experimental essay film from YouTube videos.")
@@ -577,7 +636,20 @@ def main():
         soundtrack_path=soundtrack_file or "", 
         output_filename=final_output_filename
     )
-
+    # Optionally generate narration if --narrate is specified
+    if args.narrate:
+        print("Generating narration script...")
+        narration_script = generate_narration_script(subclip_info)
+        if narration_script:
+            narration_audio_path = generate_narration_audio(narration_script)
+            if narration_audio_path:
+                print(f"Narration audio generated at {narration_audio_path}")
+                instructions.narration_path = narration_audio_path
+            else:
+                print("Failed to generate narration audio.")
+        else:
+            print("Narration script generation failed.")
+ 
     # 6. Save instructions to JSON for manual editing
     save_film_instructions_to_json(instructions, "essay_film_instructions.json")
 
