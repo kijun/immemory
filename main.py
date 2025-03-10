@@ -424,10 +424,23 @@ def render_film_from_instructions(
         print("No subclips to render.")
         return
 
+    if subclips:
+        print("Applying fade in to the first clip and fade out to the last clip.")
+        from moviepy.video.fx.all import fadein, fadeout
+        subclips[0] = fadein(subclips[0], 1)  # 1-second fade in for the first clip
+        subclips[-1] = fadeout(subclips[-1], 1)  # 1-second fade out for the last clip
+
     final = concatenate_videoclips(subclips, method="compose")
 
-    # Soundtrack and narration (if available)
+    # Preserve original clip audio if available
+    original_audio = final.audio
+
+    # Add additional audio tracks: soundtrack and narration
     audio_clips = []
+    if original_audio:
+        print("Preserving original clip audio at reduced volume.")
+        reduced_audio = original_audio.volumex(0.1)  # Lower the volume to 50%
+        audio_clips.append(reduced_audio)
     if instructions.soundtrack_path and os.path.exists(instructions.soundtrack_path):
         print(f"Adding soundtrack: {instructions.soundtrack_path}")
         music = AudioFileClip(instructions.soundtrack_path)
@@ -641,7 +654,15 @@ def main():
         print("Generating narration script...")
         narration_script = generate_narration_script(subclip_info)
         if narration_script:
-            narration_audio_path = generate_narration_audio(narration_script)
+            # Save the narration script with query and datetime
+            narration_text_filename = os.path.join(args.output_folder, f"narration_{args.query.replace(' ', '_')}_{now_str}.txt")
+            with open(narration_text_filename, "w", encoding="utf-8") as f:
+                f.write(narration_script)
+            print(f"Narration script saved as {narration_text_filename}")
+            
+            # Save narration audio with the same naming format
+            narration_audio_filename = os.path.join(args.output_folder, f"narration_{args.query.replace(' ', '_')}_{now_str}.mp3")
+            narration_audio_path = generate_narration_audio(narration_script, out_filename=narration_audio_filename)
             if narration_audio_path:
                 print(f"Narration audio generated at {narration_audio_path}")
                 instructions.narration_path = narration_audio_path
