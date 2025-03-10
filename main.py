@@ -13,6 +13,8 @@ from googleapiclient.discovery import build
 from dateutil import tz
 from dotenv import load_dotenv
 load_dotenv()
+import argparse
+from datetime import datetime
 
 # -----------------------------
 #  CONFIG / SECRETS
@@ -189,19 +191,45 @@ def timestamp_to_seconds(ts):
 def score_subtitles_with_openai(sub_lines: List[SubtitleLine]):
     """
     Use ChatCompletion to give each subtitle line a "interesting" score [1..10].
+    Caches scores in 'line_scores_cache.json' so that subsequent runs skip already scored lines.
     """
     if not OPENAI_API_KEY:
         print("No OPENAI_API_KEY provided, skipping AI-based subtitle scoring.")
         return sub_lines  # all remain score=0
 
+    cache_file = "line_scores_cache.json"
+    # Load existing cache if available
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+    except FileNotFoundError:
+        cache = {}
+
+    # Helper to generate a unique key for a subtitle line
+    def get_key(sl: SubtitleLine):
+        return f"{sl.text.strip()}_{sl.start}"
+
+    # Assign cached scores and collect lines that need scoring
+    to_score = []
+    for sl in sub_lines:
+        key = get_key(sl)
+        if key in cache:
+            sl.score = cache[key]
+        else:
+            to_score.append(sl)
+
+    if not to_score:
+        print("All subtitle lines have cached scores, skipping API call.")
+        return sub_lines
+
     from openai import OpenAI
-    
     client = OpenAI(api_key=OPENAI_API_KEY)
 
     chunk_size = 15  # lines per prompt
     i = 0
-    while i < len(sub_lines):
-        batch = sub_lines[i : i + chunk_size]
+    while i < len(to_score):
+        batch = to_score[i: i + chunk_size]
+        print(f"Scoring subtitles for batch {i+1} to {min(i+chunk_size, len(to_score))} out of {len(to_score)}")
         user_content = "Rate each snippet from 1 to 10 for how interesting it is:\n"
         for idx, sl in enumerate(batch):
             user_content += f"Snippet {idx+1}: {sl.text}\n"
@@ -214,10 +242,12 @@ def score_subtitles_with_openai(sub_lines: List[SubtitleLine]):
             {"role": "user", "content": user_content},
         ]
         try:
-            response = client.chat.completions.create(model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.0,
-            max_tokens=300)
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=0.0,
+                max_tokens=300
+            )
             reply = response.choices[0].message.content.strip()
             print("Received reply from OpenAI API:", reply)
             # parse lines: "Snippet 1: 7"
@@ -229,14 +259,24 @@ def score_subtitles_with_openai(sub_lines: List[SubtitleLine]):
                     snippet_idx = int(m.group(1)) - 1
                     rating = float(m.group(2))
                     scores.append((snippet_idx, rating))
-            # apply them
             for (snippet_idx, rating) in scores:
                 if 0 <= snippet_idx < len(batch):
                     batch[snippet_idx].score = rating
+                    # Update cache for this line
+                    key = get_key(batch[snippet_idx])
+                    cache[key] = rating
         except Exception as e:
             print(f"OpenAI API error: {e}")
 
         i += chunk_size
+
+    # Save updated cache
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2)
+        print(f"Updated line scores cache saved to {cache_file}")
+    except Exception as e:
+        print(f"Error saving cache: {e}")
 
     return sub_lines
 
@@ -405,9 +445,28 @@ def render_film_from_instructions(
 #  MAIN DEMO
 # -----------------------------
 def main():
+    parser = argparse.ArgumentParser(description="Generate experimental essay film from YouTube videos.")
+    parser.add_argument("--query", type=str, default="America", help="Search query for YouTube videos")
+    parser.add_argument("--max_results", type=int, default=3, help="Max results to retrieve from YouTube")
+    parser.add_argument("--randomize", action="store_true", help="Randomize clip order")
+    parser.add_argument("--output_folder", type=str, default="output", help="Folder to store final output")
+    parser.add_argument("--output_prefix", type=str, default="experimental_essay_film", help="Prefix for output file")
+    parser.add_argument("--min_clips", type=int, default=5, help="Minimum number of subclips per video")
+    parser.add_argument("--max_clips", type=int, default=15, help="Maximum number of subclips per video")
+    parser.add_argument("--min_duration", type=float, default=0.1, help="Minimum subclip duration in seconds")
+    parser.add_argument("--max_duration", type=float, default=4.0, help="Maximum subclip duration in seconds")
+    args = parser.parse_args()
+
+    # Ensure output folder exists
+    os.makedirs(args.output_folder, exist_ok=True)
+
+    # Generate final output filename with current date-time appended
+    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    final_output_filename = os.path.join(args.output_folder, f"{args.output_prefix}_{now_str}.mp4")
+
     # 1. Search YouTube
-    query = "America"  # or any keyword you want
-    max_results = 3
+    query = args.query
+    max_results = args.max_results
     print(f"Searching YouTube for '{query}'...")
     found_videos = search_youtube_videos(query, max_results=max_results)
 
@@ -429,39 +488,36 @@ def main():
         print("No videos successfully downloaded, exiting.")
         return
 
-    # 3. Parse subtitles, pick interesting lines
-    #    We'll pick top 3 lines from each video for the montage
+    # 3. Generate random subclips for each video
     subclip_info = []
     for vid_file in downloaded:
-        # Try to find subtitles matching this file
-        base_noext = os.path.splitext(vid_file)[0]
-        # e.g., "My Title_abc123"
-        # We'll look for any .vtt or .srt containing that base
-        sub_candidates = glob.glob(f"{base_noext}*.vtt") + glob.glob(f"{base_noext}*.srt")
-        if not sub_candidates:
-            print(f"No subtitles found for {vid_file}, skipping interesting lines.")
+        try:
+            clip = VideoFileClip(vid_file)
+            duration = clip.duration
+            clip.close()
+        except Exception as e:
+            print(f"Error loading video {vid_file}: {e}")
             continue
-        sub_path = sub_candidates[0]
-        lines = parse_subtitle_file(sub_path)
-        if not lines:
-            print(f"Subtitle parse returned 0 lines for {sub_path}")
-            continue
-        # Score lines with OpenAI if available
-        lines = score_subtitles_with_openai(lines)
-        # pick top 3
-        top3 = select_top_moments(lines, top_n=3)
-        for line in top3:
-            # We'll expand 2 seconds earlier for context, 10s total clip
-            start_sec = max(0, line.start - 2)
-            end_sec = start_sec + 10
+        num_clips = random.randint(args.min_clips, args.max_clips)
+        for _ in range(num_clips):
+            clip_duration = random.uniform(args.min_duration, args.max_duration)
+            if duration <= clip_duration:
+                start_sec = 0
+                end_sec = duration
+            else:
+                start_sec = random.uniform(0, duration - clip_duration)
+                end_sec = start_sec + clip_duration
             subclip_info.append((vid_file, start_sec, end_sec))
 
     if not subclip_info:
         print("No interesting subclips found, let's just skip montage.")
         return
 
+    # Optionally randomize clip order if flag provided
+    if args.randomize:
+        random.shuffle(subclip_info)
+
     # 4. Generate an AI soundtrack (optional)
-    #    For demonstration: create a 60s abstract track
     soundtrack_file = None
     if MUBERT_API_KEY:
         soundtrack_file = generate_mubert_track(duration=60, style="abstract_electronic")
@@ -469,24 +525,18 @@ def main():
         print("No MUBERT_API_KEY, skipping soundtrack generation.")
 
     # 5. Build film instructions (montage)
-    #    Shuffle subclips for experimental effect
-    random.shuffle(subclip_info)
     instructions = build_film_instructions(
         subclip_info, 
         soundtrack_path=soundtrack_file or "", 
-        output_filename="experimental_essay_film.mp4"
+        output_filename=final_output_filename
     )
 
     # 6. Save instructions to JSON for manual editing
     save_film_instructions_to_json(instructions, "essay_film_instructions.json")
 
-    # 7. (Optional) The user can manually open essay_film_instructions.json,
-    #    reorder subclips, adjust start/end times or volumes, etc.
-
-    # 8. Render final film from the instructions
-    #    We'll just call it automatically now:
+    # 7. Render final film from the instructions
     final_instructions = load_film_instructions_from_json("essay_film_instructions.json")
-    render_film_from_instructions(final_instructions)
+    render_film_from_instructions(final_instructions, final_file=final_output_filename)
 
 
 if __name__ == "__main__":
