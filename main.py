@@ -444,6 +444,52 @@ def render_film_from_instructions(
 # -----------------------------
 #  MAIN DEMO
 # -----------------------------
+def generate_narration_script(clips_info):
+    """
+    Use OpenAI's ChatCompletion to generate a narration script for the film,
+    based on the provided clips information.
+    """
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    prompt = "Write a thoughtful, reflective narration script for a found footage essay film. The film is composed of the following clips:\n"
+    for (vid_file, start, end) in clips_info:
+        prompt += f"- Clip from {vid_file} starting at {start:.2f}s to {end:.2f}s\n"
+    prompt += "\nThe narration should weave these clips into a coherent essay."
+    messages = [
+        {"role": "system", "content": "You are a creative script writer."},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        response = client.chat.completions.create(
+            #model="gpt-4o-mini",
+            model="o3-mini",
+            messages=messages,
+            temperature=0.7,
+            #max_tokens=500
+        )
+        script = response.choices[0].message.content.strip()
+        print("Generated narration script:", script)
+        return script
+    except Exception as e:
+        print("Error generating narration script:", e)
+        return ""
+
+
+def generate_narration_audio(script, lang="en", out_filename="narration.mp3"):
+    """
+    Convert the narration script to an audio file using gTTS.
+    Requires gTTS library: pip install gtts
+    """
+    try:
+        from gtts import gTTS
+        tts = gTTS(text=script, lang=lang)
+        tts.save(out_filename)
+        print(f"Narration audio saved as {out_filename}")
+        return out_filename
+    except Exception as e:
+        print("Error generating narration audio:", e)
+        return ""
+
 def main():
     parser = argparse.ArgumentParser(description="Generate experimental essay film from YouTube videos.")
     parser.add_argument("--query", type=str, default="America", help="Search query for YouTube videos")
@@ -455,6 +501,7 @@ def main():
     parser.add_argument("--max_clips", type=int, default=15, help="Maximum number of subclips per video")
     parser.add_argument("--min_duration", type=float, default=0.1, help="Minimum subclip duration in seconds")
     parser.add_argument("--max_duration", type=float, default=4.0, help="Maximum subclip duration in seconds")
+    parser.add_argument("--narrate", action="store_true", help="Generate narration for the film")
     args = parser.parse_args()
 
     # Ensure output folder exists
