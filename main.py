@@ -8,6 +8,42 @@ import requests
 import subprocess
 from dataclasses import dataclass, field
 from typing import List
+
+def expand_keyword_with_gpt(keyword: str, how_many: int = 3) -> List[str]:
+    """Use GPT to generate multiple search queries from a single keyword."""
+    if not OPENAI_API_KEY:
+        print("No OPENAI_API_KEY provided, skipping GPT-based query expansion.")
+        return [keyword]
+
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+
+    system_message = "You are a creative brainstorming assistant."
+    user_message = f"""Expand the following keyword into {how_many} different, thematically related search queries for YouTube:
+Keyword: {keyword}
+
+Focus on different angles or 'vectors' (e.g., aesthetic, historical, critical). 
+Simply return each query as a separate line without explanation."""
+
+    messages = [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": user_message}
+    ]
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=200,
+            temperature=0.7
+        )
+        content = response.choices[0].message.content.strip()
+        # Parse lines from the response
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        return lines
+    except Exception as e:
+        print("Error expanding keyword with GPT:", e)
+        return [keyword]
 #from moviepy import *
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_videoclips
 from googleapiclient.discovery import build
@@ -482,7 +518,7 @@ def render_film_from_instructions(
             sub_text = get_subtitle_text_for_clip(clip_info.source_video, clip_info.start, clip_info.end)
             if sub_text:
                 print(f"Adding subtitles to clip from {clip_info.source_video}")
-                vc = add_subtitles_to_clip(vc, sub_text)
+                #vc = add_subtitles_to_clip(vc, sub_text)
             
             subclips.append(vc)
         except Exception as e:
@@ -543,23 +579,21 @@ def generate_narration_script(clips_info, agents=AGENTS):
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
 
-    # Determine how many subclips each agent should reference
-    num_agents = len(agents)
-    subclips_per_agent = len(clips_info) // num_agents
-
     conversation_so_far = ""
-    # Loop over each agent in order, building a conversation
-    for i, agent in enumerate(agents):
-        # Get subclips for the current agent
-        agent_clip_segment = clips_info[i * subclips_per_agent : (i + 1) * subclips_per_agent]
-        
-        # Build transcript fragments for these subclips
+
+    # Shuffle the subclips so we pick them in random order
+    random.shuffle(clips_info)
+
+    # For each subclip, randomly pick an agent
+    for (vid_file, start, end) in clips_info:
+        agent = random.choice(agents)
+
+        # Build transcript for this subclip
         transcripts_text = ""
-        for (vid_file, start, end) in agent_clip_segment:
-            sub_text = get_subtitle_text_for_clip(vid_file, start, end)
-            if sub_text:
-                transcripts_text += f"{sub_text}\n"
-        
+        sub_text = get_subtitle_text_for_clip(vid_file, start, end)
+        if sub_text:
+            transcripts_text += f"{sub_text}\n"
+
         # Construct the conversation prompt with the conversation so far
         user_prompt = f"""
 {agent['style_instructions']}
@@ -567,18 +601,20 @@ def generate_narration_script(clips_info, agents=AGENTS):
 The conversation so far:
 {conversation_so_far}
 
-Now, {agent['name']}, please respond and incorporate the following subtitle fragments:
+Now, {agent['name']}, please respond to the conversation, incorporating this subtitle fragment:
 {transcripts_text}
 """
+
         messages = [
             {"role": "system", "content": "You are a creative script writer."},
             {"role": "user", "content": user_prompt}
         ]
+
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                max_tokens=500
+                max_tokens=200
             )
             agent_text = response.choices[0].message.content.strip()
             # Update the conversation history with this agent's response
@@ -588,13 +624,16 @@ Now, {agent['name']}, please respond and incorporate the following subtitle frag
             conversation_so_far += f"\n{agent['name'].upper()}:\n[Error or no content]\n"
 
     print("Generated multi-agent conversation script:", conversation_so_far)
+
+    # Keep the refinement step
     improvement_feedback = """1) Clarify each character's perspective.
 2) Reduce repetition.
 3) Add breathing room with some shorter sentences.
 4) Include a few concrete touches.
 5) Respond or reference previous voices lightly.
 6) Build a smooth arc across the entire text.
-7) Remove asterisks, etc (will be read by TTS)."""
+7) Remove asterisks, etc (will be read by TTS).
+8) Remix the text so that no one voice occupies the space for too long."""
     print("Refining script based on feedback...")
     refined_script = improve_script(conversation_so_far, improvement_feedback)
     print("Refined multi-agent conversation script:", refined_script)
@@ -710,9 +749,9 @@ Only return the rewritten result : it will be read by TTS.
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=messages,
-            max_tokens=2000,
+            max_tokens=3000,
             temperature=0.7
         )
         improved_text = response.choices[0].message.content.strip()
@@ -749,11 +788,19 @@ def main():
         print("Retrieving trending videos...")
         all_found_videos = get_most_popular_videos(max_results=args.max_results, region_code="US")
     else:
-        queries = [q.strip() for q in args.query.split(",")]
+        # Use GPT to expand the user query into multiple queries
+        print(f"Expanding the query '{args.query}' into multiple related queries with GPT...")
+        expanded_queries = expand_keyword_with_gpt(args.query, how_many=3)
+        
+        print("GPT gave these queries:")
+        for eq in expanded_queries:
+            print(" -", eq)
+
         all_found_videos = []
-        for query in queries:
-            print(f"Searching YouTube for '{query}'...")
-            found_videos = search_youtube_videos(query, max_results=args.max_results)
+        # For each expanded query, search YouTube
+        for q in expanded_queries:
+            print(f"Searching YouTube for '{q}'...")
+            found_videos = search_youtube_videos(q, max_results=args.max_results)
             all_found_videos.extend(found_videos)
 
     if not all_found_videos:
