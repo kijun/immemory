@@ -8,11 +8,18 @@ import requests
 import subprocess
 from dataclasses import dataclass, field
 from typing import List
+#from moviepy import *
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_videoclips
 from googleapiclient.discovery import build
 from dateutil import tz
 from dotenv import load_dotenv
 load_dotenv()
+try:
+    from PIL import Image
+    if not hasattr(Image, 'ANTIALIAS'):
+        Image.ANTIALIAS = Image.Resampling.LANCZOS
+except ImportError:
+    pass
 import argparse
 from datetime import datetime
 
@@ -412,11 +419,34 @@ def render_film_from_instructions(
         try:
             vc = VideoFileClip(clip_info.source_video).subclip(clip_info.start, clip_info.end)
             vc = vc.volumex(clip_info.volume)
-            subclips.append(vc)
+            # Apply a random static zoom effect
+            A = random.uniform(0.15, 0.80)  # Zoom variation between 5% and 20%
+            zoom_factor = 1 + A
+            w, h = vc.w, vc.h
+            x1_val = int((w - (w / zoom_factor)) / 2)
+            x2_val = int((w + (w / zoom_factor)) / 2)
+            y1_val = int((h - (h / zoom_factor)) / 2)
+            y2_val = int((h + (h / zoom_factor)) / 2)
+            from moviepy.video.fx.all import crop
+            vc = crop(vc, x1=x1_val, x2=x2_val, y1=y1_val, y2=y2_val)
+            vc = vc.resize((w, h))
+
+            from moviepy.video.fx.all import colorx
+            # ... after cropping and resizing
+            vc = colorx(vc, 1.2)  # Increase color saturation by 20%
+            from moviepy.video.fx.all import lum_contrast
+
+            # Adjust luminance, contrast, and optionally saturation.
+            #vc = lum_contrast(vc, lum=0, contrast=50, contrast_thr=128)
+            vc = vc.fl_image(glitch_effect)
+            
+            # Add subtitles if available
             sub_text = get_subtitle_text_for_clip(clip_info.source_video, clip_info.start, clip_info.end)
             if sub_text:
                 print(f"Adding subtitles to clip from {clip_info.source_video}")
                 vc = add_subtitles_to_clip(vc, sub_text)
+            
+            subclips.append(vc)
         except Exception as e:
             print(f"Error loading subclip from {clip_info.source_video}: {e}")
 
@@ -439,7 +469,8 @@ def render_film_from_instructions(
     audio_clips = []
     if original_audio:
         print("Preserving original clip audio at reduced volume.")
-        reduced_audio = original_audio.volumex(0.1)  # Lower the volume to 50%
+        reduced_audio = original_audio.volumex(0.3)  # Lower the volume to 50%
+        #reduced_audio = original_audio
         audio_clips.append(reduced_audio)
     if instructions.soundtrack_path and os.path.exists(instructions.soundtrack_path):
         print(f"Adding soundtrack: {instructions.soundtrack_path}")
@@ -477,15 +508,65 @@ def generate_narration_script(clips_info):
     """
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
-    prompt = "Write a narration script for a found footage essay film. The film is composed of the following clips:\n"
+    prompt = "Write a script/narration for a found footage essay film inspired by hito steyerl and harun farocki. David Jhave Johnston. The film is composed of the following clips:\n"
     for (vid_file, start, end) in clips_info:
         # Get transcription lines for the clip
         transcription = get_subtitle_text_for_clip(vid_file, start, end)
         if transcription:
-            prompt += f"- Clip from {vid_file} starting at {start:.2f}s to {end:.2f}s. Transcription: {transcription}\n"
+            #prompt += f"- Clip from {vid_file} starting at {start:.2f}s to {end:.2f}s. Transcription: {transcription}\n"
+            prompt += "{transcription}\n"
         else:
-            prompt += f"- Clip from {vid_file} starting at {start:.2f}s to {end:.2f}s\n"
-    prompt += "\nThe narration should weave these transcriptions into a coherent but sarcastic essay in the style of Hito Steyerl and Chris Marker with influence from Italo Calvino. Use profanity."
+            prompt += ""
+            #prompt += f"- Clip from {vid_file} starting at {start:.2f}s to {end:.2f}s\n"
+    #prompt += "\nThe narration should merge these transcriptions into the style: Postmodern poet, Hito Steyrel whose works splice fragmented memories, glitching realities, and scraped digital detritus into jagged, data-driven verse. Explore the tension between human identity and algorithmic distortion, where poetry becomes both a database and a broken mirror, but in a roundabout way without directly using technical lingos or only if they are extremely specific. Use profanity."
+    prompt += "\nThe narration should merge these transcriptions into the style: whose works splice fragmented memories, glitching realities, and scraped digital detritus into jagged, data-driven verse. David Jhave Johnston. Use profanity."
+    promptt = """Also incorporate sample text from
+    ## Emergence of Dark Gothic MAGA
+
+In the middle of a grim election cycle—though nobody could recall precisely which year, for time was misaligned—Elon Musk appeared on a broadcast, wearing a black MAGA hat that seemed to flicker like broken starlight under studio LEDs. He announced a new faction—Dark Gothic MAGA—his tone sliding between venture-capital rhetoric and the theatrical mania of an end-times cult leader. Onlookers and supporters alike stayed transfixed across their screens.
+
+> “The liquidity rules the world,” he declared, “and we who swim in its dark pools shall rule the future, devour the future.”
+> 
+
+Those words, woven from panic and prophecy, flickered across every cable channel and smartphone across the world. Soon they were repeated like scripture in the corridors of power, spurring an ominous carnival of opportunists and true believers alike.
+
+José Saramago once wrote, “Inside us there is something that has no name, that something is what we are.” Here, that “something” took the shape of an insatiable hunger for new frontiers: real estate, cryptocurrency, the intangible illusions of an economy whose valences few could understand. They called it “progress,” but if you closed your eyes at night, you might still see the black hat floating in the dark.
+
+In this new Dark Gothic cosmos, the cost of living soared to impossible heights: government presses running ceaselessly “to keep the markets afloat.” In the aftermath, each city block became a carnival of unsettled debts. People sold slices of their tomorrows to buy precarious dwellings in towers owned by conglomerates with spectral names like Obsidian Capital. Rumor had it that this spectral entity possessed not merely properties but the intangible essence of entire neighborhoods—five million units from some long-forgotten mortgage crisis, all quietly consumed and repackaged into the game of modern survival.
+
+Participation was inevitable.
+
+One could not simply choose to stand outside the system; education demanded tuition, healthcare demanded insurance, computing required subscriptions, the future demanded the purchase of intangible securities. So, the populace muttered and cursed while bidding on the next round of volatile assets, all to secure a flicker of stability in a world where Dark Gothic MAGA's mantra—precarity, defunding, ghosting, haunting—was etched into daily life. As if invoking Fredric Jameson, the local newspapers concluded: “*It is far easier to imagine the end of the world than the end of this capitalism.*”
+
+## A Peculiar Heir
+
+Whispers swirled of a “child wiz” anointed by this new gothic order, a strange youth half-coded in binary, half-born from the corners of social media memes. They said his eyes carried the reflection of satellights, and that his singular mission was to sever the heads of all who dared question the new dispensation. Grim rumors claimed that devotees of Dark Gothic MAGA rejoiced in the notion of purging dissent, hoping the purge might cleanse them of their own silent fears. Meanwhile, the opposition, if there was any, now shuffled in place like marionettes, lacking any tangible plan to curb the tide. Their manifestos lay scattered, half-finished, at the feet of uninterested peasants. They chanted how debt was a sacrament, subscriptions were a necessary ritual, and intangible securities a sublime miracle of faith.
+
+> “Nothing can help them,” the child wiz was rumored to say in a voice both ancient and eerily out of time. “Their world is built on illusions of distributive equity. Ours is built on unstoppable inevitabilities.”
+> 
+
+## An Empire of Falling Stars
+
+Then, one night, the sky cracked open, releasing hundred thousand Starlink satellites in a dazzling, militant formation. They cut across the heavens in silent waves, as if staking celestial claims to every inch of space. The MAGA faithful pointed upwards in triumph.
+
+“They will see us from the margins now,” they chanted. “They will see and tremble.”
+
+In the half-light of these mechanical constellations, you could hear the anxious murmurs from the edges of Utopia—the same hush once heard in fishermen’s coves and hidden communes, where small gatherings had dared to believe life might be governed by fellowship and little wonders. Now, confronted by this airborne armada, they felt the chill of a creeping enclosure, as if someone had built a fence around the sky itself.
+
+Yet in the whispered corners of those margins, an echo from the Magical Marxists lingered: their half-mystical, half-rational incantations proclaiming that no empire—no matter how colossal or well-funded—could fully extinguish the seeds of another world. One was reminded of Benjamin’s old warning, “*There is no document of civilization which is not at the same time a document of barbarism.” U*nder black umbrellas, small assemblies passed around contraband manuscripts brimming with new forms of solidarity. Recipes for free bread and songs for futures that cost everything mingled in defiance.
+
+## Edge of a Dream
+
+The mesmerizing power of Dark Gothic MAGA relied on its ability to turn desperation into spectacle. It fed on the lust for a safe retirement, for a guaranteed place to live, for an education that wouldn’t shatter one’s finances—all real needs in a precarious age. But it transformed these desires into a high-stakes gamble in which the house always won. Corporations, markets, the devouring reach of intangible capital: they conspired to make you believe *there is no other way.* And so countless people, pinned by the weight of necessity, felt compelled to play the game, hoping luck might favor them—just once.
+
+Back in the parade stands, the child wiz raised a ceremonial blade high, as if to punctuate a final flourish in Dark Gothic MAGA’s opera. Applause erupted from the crowd below, though for some it was laced with dread. From the light eminating from the phones, a hush spread, like a secret about to be revealed. A forest of phone screens glowed brighter, then flickered. Star-lights shimmered on the horizon, creating fleeting silhouettes—illusions, or glimpses of a different possibility?
+
+For a moment, time seemed to pause. One could almost hear the ocean humming an ancient lullaby, a testament to the persistence of wonders. In that lull, a faint voice reminded us:
+
+“Nothing has changed. Everything can change.”
+
+We may now reside under satellite-laden skies, at the mercy of monstrous landlords, in a system that demands we kneel or starve. Yet the seeds of a different tomorrow remain planted in the margins—where people still dare to inquire, craft, and conspire in the name of a world that forever slips from the grasp of those who would claim it.
+    """
     messages = [
         {"role": "system", "content": "You are a creative script writer."},
         {"role": "user", "content": prompt},
@@ -552,15 +633,27 @@ def add_subtitles_to_clip(clip, subtitle_text):
     #txt_clip = TextClip(subtitle_text, fontsize=24, color='white', method='caption', size=(clip.w - 20, None))
     # Using pillow method with a semi-transparent background to improve visibility.
     txt_clip = TextClip(
-        #subtitle_text, 
-        "HELLO WORLD",
-        fontsize=32, 
+        subtitle_text, 
+        fontsize=3, 
         color='white', 
         method='caption',
         bg_color='black',  # Add background to improve visibility
     )
-    txt_clip = txt_clip.set_duration(clip.duration).set_position(('center', 'center'))
+    txt_clip = txt_clip.set_duration(clip.duration).set_position(('center', 'bottom'))
     return CompositeVideoClip([clip, txt_clip])
+
+def glitch_effect(frame):
+    import numpy as np
+    import random
+    # 10% chance to apply a glitch effect on this frame
+    if random.random() < 0.1:
+        offset = random.randint(-15, 15)
+        # Shift the frame horizontally
+        frame = np.roll(frame, offset, axis=1)
+        # Optionally, add some random noise
+        noise = np.random.randint(0, 30, frame.shape, dtype='uint8')
+        frame = np.clip(frame + noise, 0, 255)
+    return frame
 
 def main():
     parser = argparse.ArgumentParser(description="Generate experimental essay film from YouTube videos.")
@@ -583,19 +676,21 @@ def main():
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     final_output_filename = os.path.join(args.output_folder, f"{args.output_prefix}_{now_str}.mp4")
 
-    # 1. Search YouTube
-    query = args.query
-    max_results = args.max_results
-    print(f"Searching YouTube for '{query}'...")
-    found_videos = search_youtube_videos(query, max_results=max_results)
+    # 1. Search YouTube: allow comma-separated queries
+    queries = [q.strip() for q in args.query.split(',')]
+    all_found_videos = []
+    for query in queries:
+        print(f"Searching YouTube for '{query}'...")
+        found_videos = search_youtube_videos(query, max_results=args.max_results)
+        all_found_videos.extend(found_videos)
 
-    if not found_videos:
-        print("No videos found, exiting.")
+    if not all_found_videos:
+        print("No videos found for any query, exiting.")
         return
 
     # 2. Download each video + subs
     downloaded = []
-    for vid, title in found_videos:
+    for vid, title in all_found_videos:
         print(f"Downloading {vid} : {title}")
         mp4_file = download_youtube_video(vid)
         if mp4_file:
