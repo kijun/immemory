@@ -39,23 +39,23 @@ MUBERT_API_KEY = os.getenv("MUBERT_API_KEY", None)  # None means skip AI soundtr
 AGENTS = [
     {
         "name": "Archivist",
-        "style_instructions": "You are The Archivist: curious, melancholic, searching. Speak in short, somewhat fragmented sentences. Reference data, logs, and your ongoing frustration with disconnected findings."
+        "style_instructions": "You are The Archivist (W. G. Sebald): curious, melancholic, searching. Speak in short, somewhat fragmented sentences. Reference data, logs, and your ongoing frustration with disconnected findings. Lightly emphasize the Archivist’s detail-orientation—maybe one or two direct references to “files,” “logs,” or “fragments of data” to enrich that archival vibe. Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
     },
     {
         "name": "Curator",
-        "style_instructions": "You are The Curator: thoughtful, reflective, occasionally cynical. Speak in a measured, editorial tone. Balance aesthetic resonance and emotional impact."
+        "style_instructions": "You are The Curator (John Berger): thoughtful, reflective, occasionally cynical. Speak in a measured, editorial tone. Balance aesthetic resonance and emotional impact. As “occasionally cynical,” you could inject a bit more ironic or cutting edge—some turn of phrase that signals the Curator’s eye for how spectacle merges with profit. Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
     },
     {
         "name": "Narrator",
-        "style_instructions": "You are The Narrator: poetic, provocative, cryptic. Use metaphorical, existential language reminiscent of experimental documentary voiceover."
+        "style_instructions": "You are The Narrator (Chris Marker): poetic, provocative, cryptic. Use metaphorical, existential language reminiscent of experimental documentary voiceover. The same metaphors pile up quickly (“dance of algorithms,” “edges of spectral spaces,” “questions spiral like smoke”). Breaking them up with a couple of short, direct lines can help each metaphor land more powerfully. Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
     },
     {
         "name": "Self-Portraitist",
-        "style_instructions": "You are The Self-Portraitist: introspective, vulnerable, uncertain. Refer to personal memories and question their authenticity."
+        "style_instructions": "You are The Self-Portraitist (Maggie Nelson): introspective, vulnerable, uncertain. Refer to personal memories and question their authenticity. Because this character is “introspective, vulnerable,” you might push the personal dimension further—some small memory or bodily experience that anchors the introspection in lived detail (e.g., “My hands still tremble from the last meeting, uncertain if I said too little or too much.”). Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
     },
     {
         "name": "Theorist",
-        "style_instructions": "You are The Theorist: academic, playful, self-critical. Reference media theory and highlight your own algorithmic limitations."
+        "style_instructions": "You are The Theorist (Hito Steyerl): academic, playful, self-critical. Reference media theory and highlight your own algorithmic limitations. The Theorist could bring in a specific theoretical lens (e.g., referencing “the spectacle,” “digital enclosure,” or another concept) to further underscore the academic tone. Also, consider adding a final pivot or concluding twist—something that weaves the previous speakers’ ideas into a quick summation or new perspective.Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
     }
 ]
 
@@ -507,7 +507,7 @@ def render_film_from_instructions(
     audio_clips = []
     if original_audio:
         print("Preserving original clip audio at reduced volume.")
-        reduced_audio = original_audio.volumex(0.3)  # Lower the volume to 50%
+        reduced_audio = original_audio.volumex(0.0)  # Lower the volume to 50%
         #reduced_audio = original_audio
         audio_clips.append(reduced_audio)
     if instructions.soundtrack_path and os.path.exists(instructions.soundtrack_path):
@@ -543,55 +543,63 @@ def generate_narration_script(clips_info, agents=AGENTS):
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
 
-    # Group subclips or otherwise decide how to split them among agents
+    # Determine how many subclips each agent should reference
     num_agents = len(agents)
     subclips_per_agent = len(clips_info) // num_agents
-    script_sections = []
 
+    conversation_so_far = ""
+    # Loop over each agent in order, building a conversation
     for i, agent in enumerate(agents):
-        agent_clip_segment = clips_info[i*subclips_per_agent : (i+1)*subclips_per_agent]
-
-        # Build the user prompt:
-        # 1) Agent-specific style instructions
-        # 2) Some snippet of transcripts from those subclips
+        # Get subclips for the current agent
+        agent_clip_segment = clips_info[i * subclips_per_agent : (i + 1) * subclips_per_agent]
+        
+        # Build transcript fragments for these subclips
         transcripts_text = ""
         for (vid_file, start, end) in agent_clip_segment:
             sub_text = get_subtitle_text_for_clip(vid_file, start, end)
             if sub_text:
                 transcripts_text += f"{sub_text}\n"
-
+        
+        # Construct the conversation prompt with the conversation so far
         user_prompt = f"""
-You are now speaking as {agent['name']}.
 {agent['style_instructions']}
 
-Here are some subtitle fragments for your segment:
+The conversation so far:
+{conversation_so_far}
+
+Now, {agent['name']}, please respond and incorporate the following subtitle fragments:
 {transcripts_text}
-
-Please craft a short paragraph or monologue that reflects your agent's perspective, tying in these fragments of text.
 """
-
         messages = [
             {"role": "system", "content": "You are a creative script writer."},
             {"role": "user", "content": user_prompt}
         ]
-        
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                max_tokens=1000
+                max_tokens=500
             )
             agent_text = response.choices[0].message.content.strip()
-            # Prepend agent name or some marker
-            script_sections.append(f"{agent['name'].upper()}:\n{agent_text}\n")
-
+            # Update the conversation history with this agent's response
+            conversation_so_far += f"\n{agent['name'].upper()}:\n{agent_text}\n"
         except Exception as e:
             print("Error generating narration for", agent["name"], e)
-            script_sections.append(f"{agent['name'].upper()}:\n[Error or no content]\n")
+            conversation_so_far += f"\n{agent['name'].upper()}:\n[Error or no content]\n"
 
-    final_script = "\n".join(script_sections)
-    print("Generated multi-agent script:", final_script)
-    return final_script
+    print("Generated multi-agent conversation script:", conversation_so_far)
+    improvement_feedback = """1) Clarify each character's perspective.
+2) Reduce repetition.
+3) Add breathing room with some shorter sentences.
+4) Include a few concrete touches.
+5) Respond or reference previous voices lightly.
+6) Build a smooth arc across the entire text.
+7) Remove asterisks, etc (will be read by TTS)."""
+    print("Refining script based on feedback...")
+    refined_script = improve_script(conversation_so_far, improvement_feedback)
+    print("Refined multi-agent conversation script:", refined_script)
+    conversation_so_far = refined_script
+    return conversation_so_far
 
 def generate_narration_audio(script, lang="en", out_filename="narration.mp3"):
     """
@@ -668,6 +676,50 @@ def glitch_effect(frame):
         noise = np.random.randint(0, 30, frame.shape, dtype='uint8')
         frame = np.clip(frame + noise, 0, 255)
     return frame
+
+def improve_script(original_text, improvement_tips):
+    """
+    This function takes the entire text and a set of improvement tips,
+    then refines the text based on the feedback.
+    We'll call an AI API (like OpenAI) to do the rewriting.
+    """
+    if not OPENAI_API_KEY:
+        print("No OPENAI_API_KEY provided, skipping text improvement.")
+        return original_text
+    
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+
+    prompt = f"""
+You are an expert text editor. The user has the following text that needs refinement:
+
+Original text:
+{original_text}
+
+Improvement tips:
+{improvement_tips}
+
+Please rewrite the original text by applying the improvement tips, preserving its style and meaning but making it stronger.
+Only return the rewritten result : it will be read by TTS.
+"""
+
+    messages = [
+        {"role": "system", "content": "You are a helpful writing assistant."},
+        {"role": "user", "content": prompt}
+    ]
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=2000,
+            temperature=0.7
+        )
+        improved_text = response.choices[0].message.content.strip()
+        return improved_text
+    except Exception as e:
+        print("Error refining text:", e)
+        return original_text
 
 def main():
     parser = argparse.ArgumentParser(description="Generate experimental essay film from YouTube videos.")
@@ -796,7 +848,7 @@ def main():
     save_film_instructions_to_json(instructions, film_instructions_filename)
 
     # 7. Render final film from the instructions
-    final_instructions = load_film_instructions_from_json("essay_film_instructions.json")
+    final_instructions = load_film_instructions_from_json(film_instructions_filename)
     render_film_from_instructions(final_instructions, final_file=final_output_filename)
 
 
