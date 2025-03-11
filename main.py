@@ -35,6 +35,29 @@ MUBERT_API_KEY = os.getenv("MUBERT_API_KEY", None)  # None means skip AI soundtr
 # For clarity, we assume these are set as environment vars or replaced inline.
 # Example in terminal:
 # export YOUTUBE_API_KEY="sk-xxx..."
+# Could live at the top of main.py or a separate config file
+AGENTS = [
+    {
+        "name": "Archivist",
+        "style_instructions": "You are The Archivist: curious, melancholic, searching. Speak in short, somewhat fragmented sentences. Reference data, logs, and your ongoing frustration with disconnected findings."
+    },
+    {
+        "name": "Curator",
+        "style_instructions": "You are The Curator: thoughtful, reflective, occasionally cynical. Speak in a measured, editorial tone. Balance aesthetic resonance and emotional impact."
+    },
+    {
+        "name": "Narrator",
+        "style_instructions": "You are The Narrator: poetic, provocative, cryptic. Use metaphorical, existential language reminiscent of experimental documentary voiceover."
+    },
+    {
+        "name": "Self-Portraitist",
+        "style_instructions": "You are The Self-Portraitist: introspective, vulnerable, uncertain. Refer to personal memories and question their authenticity."
+    },
+    {
+        "name": "Theorist",
+        "style_instructions": "You are The Theorist: academic, playful, self-critical. Reference media theory and highlight your own algorithmic limitations."
+    }
+]
 
 
 # -----------------------------
@@ -93,6 +116,21 @@ def search_youtube_videos(query="America", max_results=3):
     for it in items:
         vid = it["id"]["videoId"]
         title = it["snippet"]["title"]
+        results.append((vid, title))
+    return results
+
+def get_most_popular_videos(max_results=3, region_code="US"):
+    youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+    response = youtube.videos().list(
+        chart="mostPopular",
+        regionCode=region_code,
+        part="snippet",
+        maxResults=max_results
+    ).execute()
+    results = []
+    for item in response.get("items", []):
+        vid = item["id"]
+        title = item["snippet"]["title"]
         results.append((vid, title))
     return results
 
@@ -501,90 +539,59 @@ def render_film_from_instructions(
 # -----------------------------
 #  MAIN DEMO
 # -----------------------------
-def generate_narration_script(clips_info):
-    """
-    Use OpenAI's ChatCompletion to generate a narration script for the film,
-    based on the provided clips information.
-    """
+def generate_narration_script(clips_info, agents=AGENTS):
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
-    prompt = "Write a script/narration for a found footage essay film inspired by hito steyerl and harun farocki. David Jhave Johnston. The film is composed of the following clips:\n"
-    for (vid_file, start, end) in clips_info:
-        # Get transcription lines for the clip
-        transcription = get_subtitle_text_for_clip(vid_file, start, end)
-        if transcription:
-            #prompt += f"- Clip from {vid_file} starting at {start:.2f}s to {end:.2f}s. Transcription: {transcription}\n"
-            prompt += "{transcription}\n"
-        else:
-            prompt += ""
-            #prompt += f"- Clip from {vid_file} starting at {start:.2f}s to {end:.2f}s\n"
-    #prompt += "\nThe narration should merge these transcriptions into the style: Postmodern poet, Hito Steyrel whose works splice fragmented memories, glitching realities, and scraped digital detritus into jagged, data-driven verse. Explore the tension between human identity and algorithmic distortion, where poetry becomes both a database and a broken mirror, but in a roundabout way without directly using technical lingos or only if they are extremely specific. Use profanity."
-    prompt += "\nThe narration should merge these transcriptions into the style: whose works splice fragmented memories, glitching realities, and scraped digital detritus into jagged, data-driven verse. David Jhave Johnston. Use profanity."
-    promptt = """Also incorporate sample text from
-    ## Emergence of Dark Gothic MAGA
 
-In the middle of a grim election cycle—though nobody could recall precisely which year, for time was misaligned—Elon Musk appeared on a broadcast, wearing a black MAGA hat that seemed to flicker like broken starlight under studio LEDs. He announced a new faction—Dark Gothic MAGA—his tone sliding between venture-capital rhetoric and the theatrical mania of an end-times cult leader. Onlookers and supporters alike stayed transfixed across their screens.
+    # Group subclips or otherwise decide how to split them among agents
+    num_agents = len(agents)
+    subclips_per_agent = len(clips_info) // num_agents
+    script_sections = []
 
-> “The liquidity rules the world,” he declared, “and we who swim in its dark pools shall rule the future, devour the future.”
-> 
+    for i, agent in enumerate(agents):
+        agent_clip_segment = clips_info[i*subclips_per_agent : (i+1)*subclips_per_agent]
 
-Those words, woven from panic and prophecy, flickered across every cable channel and smartphone across the world. Soon they were repeated like scripture in the corridors of power, spurring an ominous carnival of opportunists and true believers alike.
+        # Build the user prompt:
+        # 1) Agent-specific style instructions
+        # 2) Some snippet of transcripts from those subclips
+        transcripts_text = ""
+        for (vid_file, start, end) in agent_clip_segment:
+            sub_text = get_subtitle_text_for_clip(vid_file, start, end)
+            if sub_text:
+                transcripts_text += f"{sub_text}\n"
 
-José Saramago once wrote, “Inside us there is something that has no name, that something is what we are.” Here, that “something” took the shape of an insatiable hunger for new frontiers: real estate, cryptocurrency, the intangible illusions of an economy whose valences few could understand. They called it “progress,” but if you closed your eyes at night, you might still see the black hat floating in the dark.
+        user_prompt = f"""
+You are now speaking as {agent['name']}.
+{agent['style_instructions']}
 
-In this new Dark Gothic cosmos, the cost of living soared to impossible heights: government presses running ceaselessly “to keep the markets afloat.” In the aftermath, each city block became a carnival of unsettled debts. People sold slices of their tomorrows to buy precarious dwellings in towers owned by conglomerates with spectral names like Obsidian Capital. Rumor had it that this spectral entity possessed not merely properties but the intangible essence of entire neighborhoods—five million units from some long-forgotten mortgage crisis, all quietly consumed and repackaged into the game of modern survival.
+Here are some subtitle fragments for your segment:
+{transcripts_text}
 
-Participation was inevitable.
+Please craft a short paragraph or monologue that reflects your agent's perspective, tying in these fragments of text.
+"""
 
-One could not simply choose to stand outside the system; education demanded tuition, healthcare demanded insurance, computing required subscriptions, the future demanded the purchase of intangible securities. So, the populace muttered and cursed while bidding on the next round of volatile assets, all to secure a flicker of stability in a world where Dark Gothic MAGA's mantra—precarity, defunding, ghosting, haunting—was etched into daily life. As if invoking Fredric Jameson, the local newspapers concluded: “*It is far easier to imagine the end of the world than the end of this capitalism.*”
+        messages = [
+            {"role": "system", "content": "You are a creative script writer."},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                max_tokens=1000
+            )
+            agent_text = response.choices[0].message.content.strip()
+            # Prepend agent name or some marker
+            script_sections.append(f"{agent['name'].upper()}:\n{agent_text}\n")
 
-## A Peculiar Heir
+        except Exception as e:
+            print("Error generating narration for", agent["name"], e)
+            script_sections.append(f"{agent['name'].upper()}:\n[Error or no content]\n")
 
-Whispers swirled of a “child wiz” anointed by this new gothic order, a strange youth half-coded in binary, half-born from the corners of social media memes. They said his eyes carried the reflection of satellights, and that his singular mission was to sever the heads of all who dared question the new dispensation. Grim rumors claimed that devotees of Dark Gothic MAGA rejoiced in the notion of purging dissent, hoping the purge might cleanse them of their own silent fears. Meanwhile, the opposition, if there was any, now shuffled in place like marionettes, lacking any tangible plan to curb the tide. Their manifestos lay scattered, half-finished, at the feet of uninterested peasants. They chanted how debt was a sacrament, subscriptions were a necessary ritual, and intangible securities a sublime miracle of faith.
-
-> “Nothing can help them,” the child wiz was rumored to say in a voice both ancient and eerily out of time. “Their world is built on illusions of distributive equity. Ours is built on unstoppable inevitabilities.”
-> 
-
-## An Empire of Falling Stars
-
-Then, one night, the sky cracked open, releasing hundred thousand Starlink satellites in a dazzling, militant formation. They cut across the heavens in silent waves, as if staking celestial claims to every inch of space. The MAGA faithful pointed upwards in triumph.
-
-“They will see us from the margins now,” they chanted. “They will see and tremble.”
-
-In the half-light of these mechanical constellations, you could hear the anxious murmurs from the edges of Utopia—the same hush once heard in fishermen’s coves and hidden communes, where small gatherings had dared to believe life might be governed by fellowship and little wonders. Now, confronted by this airborne armada, they felt the chill of a creeping enclosure, as if someone had built a fence around the sky itself.
-
-Yet in the whispered corners of those margins, an echo from the Magical Marxists lingered: their half-mystical, half-rational incantations proclaiming that no empire—no matter how colossal or well-funded—could fully extinguish the seeds of another world. One was reminded of Benjamin’s old warning, “*There is no document of civilization which is not at the same time a document of barbarism.” U*nder black umbrellas, small assemblies passed around contraband manuscripts brimming with new forms of solidarity. Recipes for free bread and songs for futures that cost everything mingled in defiance.
-
-## Edge of a Dream
-
-The mesmerizing power of Dark Gothic MAGA relied on its ability to turn desperation into spectacle. It fed on the lust for a safe retirement, for a guaranteed place to live, for an education that wouldn’t shatter one’s finances—all real needs in a precarious age. But it transformed these desires into a high-stakes gamble in which the house always won. Corporations, markets, the devouring reach of intangible capital: they conspired to make you believe *there is no other way.* And so countless people, pinned by the weight of necessity, felt compelled to play the game, hoping luck might favor them—just once.
-
-Back in the parade stands, the child wiz raised a ceremonial blade high, as if to punctuate a final flourish in Dark Gothic MAGA’s opera. Applause erupted from the crowd below, though for some it was laced with dread. From the light eminating from the phones, a hush spread, like a secret about to be revealed. A forest of phone screens glowed brighter, then flickered. Star-lights shimmered on the horizon, creating fleeting silhouettes—illusions, or glimpses of a different possibility?
-
-For a moment, time seemed to pause. One could almost hear the ocean humming an ancient lullaby, a testament to the persistence of wonders. In that lull, a faint voice reminded us:
-
-“Nothing has changed. Everything can change.”
-
-We may now reside under satellite-laden skies, at the mercy of monstrous landlords, in a system that demands we kneel or starve. Yet the seeds of a different tomorrow remain planted in the margins—where people still dare to inquire, craft, and conspire in the name of a world that forever slips from the grasp of those who would claim it.
-    """
-    messages = [
-        {"role": "system", "content": "You are a creative script writer."},
-        {"role": "user", "content": prompt},
-    ]
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            #model="o3-mini",
-            messages=messages,
-            max_tokens=5000
-        )
-        script = response.choices[0].message.content.strip()
-        print("Generated narration script:", script)
-        return script
-    except Exception as e:
-        print("Error generating narration script:", e)
-        return ""
-
+    final_script = "\n".join(script_sections)
+    print("Generated multi-agent script:", final_script)
+    return final_script
 
 def generate_narration_audio(script, lang="en", out_filename="narration.mp3"):
     """
@@ -621,6 +628,13 @@ def get_subtitle_text_for_clip(video_file, clip_start, clip_end):
     # Filter subtitle lines that fall within the clip time range
     clip_lines = [line.text for line in lines if line.start >= clip_start and line.end <= clip_end]
     return "\n".join(clip_lines)
+
+def compute_narrative_score_for_clip(video_file, start, end):
+    """
+    Compute a narrative score for a clip based on the number of words in its subtitles.
+    """
+    text = get_subtitle_text_for_clip(video_file, start, end)
+    return len(text.split()) if text else 0
 
 
 def add_subtitles_to_clip(clip, subtitle_text):
@@ -667,6 +681,8 @@ def main():
     parser.add_argument("--min_duration", type=float, default=0.1, help="Minimum subclip duration in seconds")
     parser.add_argument("--max_duration", type=float, default=4.0, help="Maximum subclip duration in seconds")
     parser.add_argument("--narrate", action="store_true", help="Generate narration for the film")
+    parser.add_argument("--narrative_order", action="store_true", help="Order clips narratively based on subtitle content")
+    parser.add_argument("--trending", action="store_true", help="Use trending videos instead of query search")
     args = parser.parse_args()
 
     # Ensure output folder exists
@@ -676,13 +692,17 @@ def main():
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     final_output_filename = os.path.join(args.output_folder, f"{args.output_prefix}_{now_str}.mp4")
 
-    # 1. Search YouTube: allow comma-separated queries
-    queries = [q.strip() for q in args.query.split(',')]
-    all_found_videos = []
-    for query in queries:
-        print(f"Searching YouTube for '{query}'...")
-        found_videos = search_youtube_videos(query, max_results=args.max_results)
-        all_found_videos.extend(found_videos)
+    # 1. Retrieve YouTube videos
+    if args.trending:
+        print("Retrieving trending videos...")
+        all_found_videos = get_most_popular_videos(max_results=args.max_results, region_code="US")
+    else:
+        queries = [q.strip() for q in args.query.split(",")]
+        all_found_videos = []
+        for query in queries:
+            print(f"Searching YouTube for '{query}'...")
+            found_videos = search_youtube_videos(query, max_results=args.max_results)
+            all_found_videos.extend(found_videos)
 
     if not all_found_videos:
         print("No videos found for any query, exiting.")
@@ -727,8 +747,12 @@ def main():
         print("No interesting subclips found, let's just skip montage.")
         return
 
-    # Optionally randomize clip order if flag provided
-    if args.randomize:
+    # Optionally order clips narratively or randomize
+    if args.narrative_order:
+        print("Ordering clips narratively based on subtitle content...")
+        subclip_info.sort(key=lambda clip: compute_narrative_score_for_clip(clip[0], clip[1], clip[2]))
+    elif args.randomize:
+        print("Randomizing clip order...")
         random.shuffle(subclip_info)
 
     # 4. Generate an AI soundtrack (optional)
@@ -767,7 +791,9 @@ def main():
             print("Narration script generation failed.")
  
     # 6. Save instructions to JSON for manual editing
-    save_film_instructions_to_json(instructions, "essay_film_instructions.json")
+    #save_film_instructions_to_json(instructions, "essay_film_instructions.json")
+    film_instructions_filename = os.path.join(args.output_folder, f"essay_film_instructions_{now_str}.json")
+    save_film_instructions_to_json(instructions, film_instructions_filename)
 
     # 7. Render final film from the instructions
     final_instructions = load_film_instructions_from_json("essay_film_instructions.json")
