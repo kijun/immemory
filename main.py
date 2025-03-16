@@ -6,6 +6,7 @@ import json
 import random
 import requests
 import subprocess
+import immemory.tts
 from dataclasses import dataclass, field
 from typing import List
 
@@ -19,7 +20,7 @@ def expand_keyword_with_gpt(keyword: str, how_many: int = 3) -> List[str]:
     client = OpenAI(api_key=OPENAI_API_KEY)
 
     system_message = "You are a creative brainstorming assistant."
-    user_message = f"""Expand the following keyword into {how_many} different, thematically related search queries for YouTube:
+    user_message = f"""Expand the following keyword into {how_many} different, short search queries for YouTube:
 Keyword: {keyword}
 
 Focus on different angles or 'vectors' (e.g., aesthetic, historical, critical). 
@@ -75,23 +76,23 @@ MUBERT_API_KEY = os.getenv("MUBERT_API_KEY", None)  # None means skip AI soundtr
 AGENTS = [
     {
         "name": "Archivist",
-        "style_instructions": "You are The Archivist (W. G. Sebald): curious, melancholic, searching. Speak in short, somewhat fragmented sentences. Reference data, logs, and your ongoing frustration with disconnected findings. Lightly emphasize the Archivist’s detail-orientation—maybe one or two direct references to “files,” “logs,” or “fragments of data” to enrich that archival vibe. Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
+        "style_instructions": "You are The Archivist (W. G. Sebald): curious, melancholic, searching. Speak in short, somewhat fragmented sentences. Reference data, logs, and your ongoing frustration with disconnected findings."
     },
-    {
-        "name": "Curator",
-        "style_instructions": "You are The Curator (John Berger): thoughtful, reflective, occasionally cynical. Speak in a measured, editorial tone. Balance aesthetic resonance and emotional impact. As “occasionally cynical,” you could inject a bit more ironic or cutting edge—some turn of phrase that signals the Curator’s eye for how spectacle merges with profit. Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
-    },
+    #{
+    #    "name": "Curator",
+    #    "style_instructions": "You are The Curator (John Berger): thoughtful, reflective, occasionally cynical. Speak in a measured, editorial tone. Balance aesthetic resonance and emotional impact. As “occasionally cynical,” you could inject a bit more ironic or cutting edge—some turn of phrase that signals the Curator’s eye for how spectacle merges with profit. Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
+    #},
     {
         "name": "Narrator",
-        "style_instructions": "You are The Narrator (Chris Marker): poetic, provocative, cryptic. Use metaphorical, existential language reminiscent of experimental documentary voiceover. The same metaphors pile up quickly (“dance of algorithms,” “edges of spectral spaces,” “questions spiral like smoke”). Breaking them up with a couple of short, direct lines can help each metaphor land more powerfully. Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
+        "style_instructions": "You are The Narrator (Chris Marker): poetic, provocative, cryptic. Use metaphorical, existential language reminiscent of experimental documentary voiceover.  Keep this question in mind as you analyze the footage: If capitalist structures rule our lives, can the specters of utopian margins manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
     },
-    {
-        "name": "Self-Portraitist",
-        "style_instructions": "You are The Self-Portraitist (Maggie Nelson): introspective, vulnerable, uncertain. Refer to personal memories and question their authenticity. Because this character is “introspective, vulnerable,” you might push the personal dimension further—some small memory or bodily experience that anchors the introspection in lived detail (e.g., “My hands still tremble from the last meeting, uncertain if I said too little or too much.”). Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
-    },
+    #{
+    #    "name": "Self-Portraitist",
+    #    "style_instructions": "You are The Self-Portraitist (Maggie Nelson): introspective, vulnerable, uncertain. Refer to personal memories and question their authenticity. Because this character is “introspective, vulnerable,” you might push the personal dimension further—some small memory or bodily experience that anchors the introspection in lived detail (e.g., “My hands still tremble from the last meeting, uncertain if I said too little or too much.”). Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
+    #},
     {
         "name": "Theorist",
-        "style_instructions": "You are The Theorist (Hito Steyerl): academic, playful, self-critical. Reference media theory and highlight your own algorithmic limitations. The Theorist could bring in a specific theoretical lens (e.g., referencing “the spectacle,” “digital enclosure,” or another concept) to further underscore the academic tone. Also, consider adding a final pivot or concluding twist—something that weaves the previous speakers’ ideas into a quick summation or new perspective.Keep this question in mind as you analyze the footage: If technofeudal platforms rule our lives, can the specters of utopian margins (à la Avery Gordon) manifest as real, if transient, sanctuaries? Or is every moment of autonomy swiftly consumed, leaving only hauntings behind?"
+        "style_instructions": "You are The Theorist (Hito Steyerl): academic, playful, self-critical. Reference media theory and highlight your own algorithmic limitations. The Theorist could bring in a specific theoretical lens to further underscore the academic tone. Also, consider adding a final pivot or concluding twist—something that weaves the previous speakers’ ideas into a quick summation or new perspective."
     }
 ]
 
@@ -507,12 +508,12 @@ def render_film_from_instructions(
 
             from moviepy.video.fx.all import colorx
             # ... after cropping and resizing
-            vc = colorx(vc, 1.2)  # Increase color saturation by 20%
-            from moviepy.video.fx.all import lum_contrast
+            #vc = colorx(vc, 1.2)  # Increase color saturation by 20%
+            #from moviepy.video.fx.all import lum_contrast
 
             # Adjust luminance, contrast, and optionally saturation.
             #vc = lum_contrast(vc, lum=0, contrast=50, contrast_thr=128)
-            vc = vc.fl_image(glitch_effect)
+            #vc = vc.fl_image(glitch_effect)
             
             # Add subtitles if available
             sub_text = get_subtitle_text_for_clip(clip_info.source_video, clip_info.start, clip_info.end)
@@ -701,7 +702,8 @@ def add_subtitles_to_clip(clip, subtitle_text):
         bg_color='black',  # Add background to improve visibility
     )
     txt_clip = txt_clip.set_duration(clip.duration).set_position(('center', 'bottom'))
-    return CompositeVideoClip([clip, txt_clip])
+    return clip
+    #return CompositeVideoClip([clip, txt_clip])
 
 def glitch_effect(frame):
     import numpy as np
@@ -774,6 +776,7 @@ def main():
     parser.add_argument("--narrate", action="store_true", help="Generate narration for the film")
     parser.add_argument("--narrative_order", action="store_true", help="Order clips narratively based on subtitle content")
     parser.add_argument("--trending", action="store_true", help="Use trending videos instead of query search")
+    parser.add_argument("--from-narration-file", type=str, help="Receive narration text instead of generating one")
     args = parser.parse_args()
 
     # Ensure output folder exists
@@ -867,18 +870,24 @@ def main():
         soundtrack_path=soundtrack_file or "", 
         output_filename=final_output_filename
     )
-    # Optionally generate narration if --narrate is specified
     if args.narrate:
-        print("Generating narration script...")
-        narration_script = generate_narration_script(subclip_info)
+        if args.from_narration_file:
+            print(f"Loading narration text from {args.from_narration_file}...")
+            try:
+                with open(args.from_narration_file, "r", encoding="utf-8") as f:
+                    narration_script = f.read()
+            except Exception as e:
+                print("Failed to load narration file:", e)
+                narration_script = ""
+        else:
+            print("Generating narration script...")
+            narration_script = generate_narration_script(subclip_info)
+            if narration_script:
+                narration_text_filename = os.path.join(args.output_folder, f"narration_{args.query.replace(' ', '_')}_{now_str}.txt")
+                with open(narration_text_filename, "w", encoding="utf-8") as f:
+                    f.write(narration_script)
+                print(f"Narration script saved as {narration_text_filename}")
         if narration_script:
-            # Save the narration script with query and datetime
-            narration_text_filename = os.path.join(args.output_folder, f"narration_{args.query.replace(' ', '_')}_{now_str}.txt")
-            with open(narration_text_filename, "w", encoding="utf-8") as f:
-                f.write(narration_script)
-            print(f"Narration script saved as {narration_text_filename}")
-            
-            # Save narration audio with the same naming format
             narration_audio_filename = os.path.join(args.output_folder, f"narration_{args.query.replace(' ', '_')}_{now_str}.mp3")
             narration_audio_path = generate_narration_audio(narration_script, out_filename=narration_audio_filename)
             if narration_audio_path:
@@ -887,7 +896,7 @@ def main():
             else:
                 print("Failed to generate narration audio.")
         else:
-            print("Narration script generation failed.")
+            print("Narration script is empty. Skipping narration generation.")
  
     # 6. Save instructions to JSON for manual editing
     #save_film_instructions_to_json(instructions, "essay_film_instructions.json")
