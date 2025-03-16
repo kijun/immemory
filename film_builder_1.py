@@ -74,19 +74,94 @@ class ScriptBuilder:
     def on_action(self, text: str):
         self.ensure_beat_exists()
         self.current_beat.actions.append(text)
+    
+    def _store_last_dialogue_info(self, full_character, line, new_character_line=False):
+        if not hasattr(self, "_last_char_info"):
+            self._last_char_info = {}
+        self._last_char_info["char"] = full_character
+        self._last_char_info["is_new_line"] = new_character_line
 
-    def on_dialogue(self, character: str, extension: str, parenthetical: str, line: str, is_dual_dialogue: bool):
+    def on_dialogue(
+        self,
+        character: str,
+        extension: str,
+        parenthetical: str,
+        line: str,
+        is_dual_dialogue: bool
+    ):
+        """
+        Merge lines that appear to be a continuation of the same typed block
+        (i.e. same character, text doesn't appear to start a new block),
+        else start a new dialogue entry.
+        """
         self.ensure_beat_exists()
 
-        # Combine extension and parenthetical into a single "character" field if you like
-        # or store them separately. We'll do a naive approach:
+        # Combine extension/parenthetical if needed
         full_character = character
         if extension:
             full_character += f" ({extension})"
         if parenthetical:
             full_character += f" [{parenthetical}]"
 
-        self.current_beat.dialogues.append((full_character, line))
+        line_stripped = line.strip()
+
+        # (CONT'D) check: we treat it as new block if found
+        import re
+
+        # This pattern allows either a straight or curly apostrophe after "CONT"
+        contd_pattern = re.compile(r'\(CONT[\'’]?D\)', re.IGNORECASE)
+        is_contd = bool(contd_pattern.search(full_character) or contd_pattern.search(line_stripped))
+
+        # Heuristic: If line_stripped looks like uppercase (≥2 letters) or starts with '(',
+        # it might be a new typed line. We'll detect that here:
+        # e.g., "NARRATOR (V.O.)" or "NARRATOR (V.O.) (CONT'D)"
+        # or user typed a brand-new chunk of dialogue. 
+        # This is a naive check—tweak to your preference.
+        starts_like_new_block = False
+        if line_stripped:
+            # If line is something like "MORE LINES" in uppercase, we treat as new block
+            # or if it starts with "(" (like "(whispering)")
+            if re.match(r'^[A-Z0-9]{2}', line_stripped) or line_stripped.startswith("("):
+                starts_like_new_block = True
+
+        # If there's no last dialogue at all, just start a new block
+        if not self.current_beat.dialogues:
+            self.current_beat.dialogues.append((full_character, line))
+            self._store_last_dialogue_info(full_character, line, new_character_line=True)
+            return
+
+        # Check the last stored dialogue
+        last_char, last_line = self.current_beat.dialogues[-1]
+
+        last_char_info = getattr(self, "_last_char_info", None)
+        if not last_char_info:
+            # If no info, define some
+            last_char_info = {"char": None, "is_new_line": True}
+            setattr(self, "_last_char_info", last_char_info)
+
+        # Decide if we should MERGE or NEW BLOCK
+        # We'll do so if same 'full_character', not (CONT'D),
+        # not uppercase, not starting with '('
+        should_merge = False
+        if last_char == full_character:
+            # same char => potential merge
+            # only merge if not (CONT'D) and not a "start-like-new-block" line
+            if not is_contd and not starts_like_new_block:
+                should_merge = True
+
+        if should_merge:
+            # Merge into the same block
+            merged_line = f"{last_line} {line_stripped}".strip()
+            self.current_beat.dialogues[-1] = (last_char, merged_line)
+            last_char_info["is_new_line"] = False
+        else:
+            # Start a new block
+            self.current_beat.dialogues.append((full_character, line))
+            last_char_info["is_new_line"] = True
+
+        # Update stored info
+        last_char_info["char"] = full_character
+        setattr(self, "_last_char_info", last_char_info)
 
     def on_transition(self, text: str):
         """If text matches our naive transition triggers, start a new subscene."""
